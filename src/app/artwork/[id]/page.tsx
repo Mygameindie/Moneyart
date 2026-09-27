@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, apiPost, apiDelete, ApiError } from "@/lib/api";
+import { getArtwork, listPaymentMethods, getOrCreateConversation, deleteArtwork } from "@/lib/data";
 import { Artwork, PaymentMethod } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
 import Avatar from "@/components/Avatar";
@@ -23,28 +23,30 @@ export default function ArtworkDetailPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api<{ artwork: Artwork }>(`/api/artworks/${params.id}`)
-      .then(async (data) => {
+    getArtwork(params.id, user?.id)
+      .then(async (found) => {
         if (cancelled) return;
-        setArtwork(data.artwork);
-        const profile = await api<{ paymentMethods: PaymentMethod[] }>(`/api/users/${data.artwork.author.username}`);
-        if (!cancelled) setPaymentMethods(profile.paymentMethods);
+        if (!found) {
+          setNotFound(true);
+          return;
+        }
+        setArtwork(found);
+        const methods = await listPaymentMethods(found.author.id);
+        if (!cancelled) setPaymentMethods(methods);
       })
       .catch(() => setNotFound(true))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [params.id, user?.id]);
 
   async function onMessage() {
     if (!artwork || !user) return router.push("/login");
     setMessaging(true);
     try {
-      const res = await apiPost<{ conversationId: string }>("/api/conversations", {
-        username: artwork.author.username,
-      });
-      router.push(`/messages/${res.conversationId}`);
+      const conversationId = await getOrCreateConversation(artwork.author.id);
+      router.push(`/messages/${conversationId}`);
     } finally {
       setMessaging(false);
     }
@@ -53,10 +55,10 @@ export default function ArtworkDetailPage() {
   async function onDelete() {
     if (!artwork || !confirm("Delete this artwork? This can't be undone.")) return;
     try {
-      await apiDelete(`/api/artworks/${artwork.id}`);
+      await deleteArtwork(artwork.id);
       router.push(`/u/${artwork.author.username}`);
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Failed to delete");
+      alert(err instanceof Error ? err.message : "Failed to delete");
     }
   }
 

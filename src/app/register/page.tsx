@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { apiPost, ApiError } from "@/lib/api";
+import { getSupabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function RegisterPage() {
@@ -13,19 +13,36 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setSubmitting(true);
     try {
-      await apiPost("/api/auth/register", { username, email, password, displayName: username });
-      await refresh();
-      router.push("/");
-      router.refresh();
+      const { data, error: signUpError } = await getSupabase().auth.signUp({
+        email,
+        password,
+        options: { data: { username, display_name: username } },
+      });
+      if (signUpError) throw signUpError;
+
+      if (data.session) {
+        await refresh();
+        router.push("/");
+        router.refresh();
+      } else {
+        setNotice("Account created! Check your email to confirm it, then log in.");
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(
+        message.toLowerCase().includes("duplicate") || message.toLowerCase().includes("username")
+          ? "That username is already taken."
+          : message
+      );
     } finally {
       setSubmitting(false);
     }
@@ -77,6 +94,7 @@ export default function RegisterPage() {
             />
           </div>
           {error && <p className="text-sm text-accent">{error}</p>}
+          {notice && <p className="text-sm text-accent2">{notice}</p>}
           <button className="btn-primary w-full" disabled={submitting} type="submit">
             {submitting ? "Creating account…" : "Sign up"}
           </button>

@@ -2,9 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { listArtworks } from "@/lib/data";
 import { Artwork } from "@/lib/types";
 import ArtworkCard from "@/components/ArtworkCard";
+import { useAuth } from "@/components/AuthProvider";
 
 export default function HomePage() {
   return (
@@ -19,17 +20,17 @@ function HomeContent() {
   const router = useRouter();
   const tag = searchParams.get("tag") || "";
 
+  const { user } = useAuth();
   const [artworks, setArtworks] = useState<Artwork[]>([]);
   const [loading, setLoading] = useState(true);
   const [tagInput, setTagInput] = useState(tag);
 
   useEffect(() => {
     setLoading(true);
-    const qs = tag ? `?tag=${encodeURIComponent(tag)}` : "";
-    api<{ artworks: Artwork[] }>(`/api/artworks${qs}`)
-      .then((data) => setArtworks(data.artworks))
+    listArtworks({ tag: tag || undefined, viewerId: user?.id })
+      .then(setArtworks)
       .finally(() => setLoading(false));
-  }, [tag]);
+  }, [tag, user?.id]);
 
   return (
     <div>

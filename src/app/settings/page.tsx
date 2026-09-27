@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, apiPatch, apiPost, apiDelete, uploadFile, ApiError } from "@/lib/api";
+import { updateMyProfile, listPaymentMethods, addPaymentMethod, removePaymentMethod, uploadPublicFile } from "@/lib/data";
 import { PaymentMethod } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
 import Avatar from "@/components/Avatar";
@@ -38,27 +38,27 @@ export default function SettingsPage() {
   }, [user]);
 
   useEffect(() => {
-    api<{ paymentMethods: PaymentMethod[] }>("/api/users/me/payment-methods").then((d) =>
-      setMethods(d.paymentMethods)
-    );
-  }, []);
+    if (!user) return;
+    listPaymentMethods(user.id).then(setMethods);
+  }, [user]);
 
   async function onAvatarChange(file: File | null) {
-    if (!file) return;
-    const uploaded = await uploadFile(file);
+    if (!file || !user) return;
+    const uploaded = await uploadPublicFile(user.id, "avatars", file);
     setAvatarUrl(uploaded.url);
   }
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
+    if (!user) return;
     setSavingProfile(true);
     setProfileMsg(null);
     try {
-      await apiPatch("/api/users/me", { displayName, bio, avatarUrl });
+      await updateMyProfile(user.id, { displayName, bio, avatarUrl });
       await refresh();
       setProfileMsg("Saved!");
     } catch (err) {
-      setProfileMsg(err instanceof ApiError ? err.message : "Failed to save");
+      setProfileMsg(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSavingProfile(false);
     }
@@ -66,6 +66,7 @@ export default function SettingsPage() {
 
   async function addMethod(e: React.FormEvent) {
     e.preventDefault();
+    if (!user) return;
     setPmError(null);
     if (!pmLabel.trim() || !pmValue.trim()) {
       setPmError("Label and value are required");
@@ -75,26 +76,23 @@ export default function SettingsPage() {
     try {
       let qrImageUrl: string | null = null;
       if (pmType === "QR" && pmQrFile) {
-        const uploaded = await uploadFile(pmQrFile);
+        const uploaded = await uploadPublicFile(user.id, "qr", pmQrFile);
         qrImageUrl = uploaded.url;
       }
-      const { paymentMethod } = await apiPost<{ paymentMethod: PaymentMethod }>(
-        "/api/users/me/payment-methods",
-        { type: pmType, label: pmLabel, value: pmValue, qrImageUrl }
-      );
+      const paymentMethod = await addPaymentMethod(user.id, { type: pmType, label: pmLabel, value: pmValue, qrImageUrl });
       setMethods((prev) => [...prev, paymentMethod]);
       setPmLabel("");
       setPmValue("");
       setPmQrFile(null);
     } catch (err) {
-      setPmError(err instanceof ApiError ? err.message : "Failed to add payment method");
+      setPmError(err instanceof Error ? err.message : "Failed to add payment method");
     } finally {
       setAddingMethod(false);
     }
   }
 
   async function removeMethod(id: string) {
-    await apiDelete(`/api/users/me/payment-methods/${id}`);
+    await removePaymentMethod(id);
     setMethods((prev) => prev.filter((m) => m.id !== id));
   }
 

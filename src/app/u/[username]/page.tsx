@@ -2,16 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, apiPost } from "@/lib/api";
+import { getProfileByUsername, listArtworks, listPaymentMethods, getOrCreateConversation } from "@/lib/data";
 import { Artwork, PaymentMethod, PublicUser } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
 import Avatar from "@/components/Avatar";
 import ArtworkCard from "@/components/ArtworkCard";
 import PaymentMethods from "@/components/PaymentMethods";
 
-type ProfileResponse = {
+type ProfileData = {
   user: PublicUser;
-  isSelf: boolean;
   paymentMethods: PaymentMethod[];
   artworks: Artwork[];
 };
@@ -21,28 +20,41 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [profile, setProfile] = useState<ProfileResponse | null>(null);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [messaging, setMessaging] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    api<ProfileResponse>(`/api/users/${params.username}`)
-      .then(setProfile)
+    getProfileByUsername(params.username)
+      .then(async (found) => {
+        if (cancelled) return;
+        if (!found) {
+          setNotFound(true);
+          return;
+        }
+        const [artworks, paymentMethods] = await Promise.all([
+          listArtworks({ authorId: found.id, viewerId: user?.id }),
+          listPaymentMethods(found.id),
+        ]);
+        if (!cancelled) setProfile({ user: found, artworks, paymentMethods });
+      })
       .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
-  }, [params.username]);
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [params.username, user?.id]);
 
   async function onMessage() {
     if (!profile) return;
     if (!user) return router.push("/login");
     setMessaging(true);
     try {
-      const res = await apiPost<{ conversationId: string }>("/api/conversations", {
-        username: profile.user.username,
-      });
-      router.push(`/messages/${res.conversationId}`);
+      const conversationId = await getOrCreateConversation(profile.user.id);
+      router.push(`/messages/${conversationId}`);
     } finally {
       setMessaging(false);
     }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { apiPost, ApiError } from "@/lib/api";
+import { toggleLike as toggleArtworkLike } from "@/lib/data";
 import { Artwork } from "@/lib/types";
 import { useAuth } from "./AuthProvider";
 import Avatar from "./Avatar";
@@ -22,13 +22,13 @@ export default function ArtworkCard({ artwork }: { artwork: Artwork }) {
     setLiked(!prevLiked);
     setLikeCount(prevCount + (prevLiked ? -1 : 1));
     try {
-      const res = await apiPost<{ liked: boolean; likeCount: number }>(`/api/artworks/${artwork.id}/like`);
+      const res = await toggleArtworkLike(artwork.id, user.id);
       setLiked(res.liked);
       setLikeCount(res.likeCount);
     } catch (err) {
       setLiked(prevLiked);
       setLikeCount(prevCount);
-      if (err instanceof ApiError) console.error(err.message);
+      console.error(err instanceof Error ? err.message : err);
     } finally {
       setBusy(false);
     }

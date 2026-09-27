@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { uploadFile, apiPost, ApiError } from "@/lib/api";
-import { Artwork } from "@/lib/types";
+import { uploadPublicFile, createArtwork } from "@/lib/data";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function UploadPage() {
@@ -39,11 +38,12 @@ export default function UploadPage() {
       setError("Please choose a file to upload — any art format is welcome.");
       return;
     }
+    if (!user) return;
     setError(null);
     setSubmitting(true);
     try {
-      const uploaded = await uploadFile(file);
-      const { artwork } = await apiPost<{ artwork: Artwork }>("/api/artworks", {
+      const uploaded = await uploadPublicFile(user.id, "artworks", file);
+      const artwork = await createArtwork({
         title,
         description,
         fileUrl: uploaded.url,
@@ -54,10 +54,11 @@ export default function UploadPage() {
           .map((t) => t.trim())
           .filter(Boolean),
         price: price ? Number(price) : null,
+        authorId: user.id,
       });
       router.push(`/artwork/${artwork.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setSubmitting(false);
     }

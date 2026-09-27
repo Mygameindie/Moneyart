@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { listMessages, listConversations, sendMessage, subscribeToMessages, markConversationRead } from "@/lib/data";
 import { ChatMessage, ConversationSummary } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
-import { getSocket } from "@/lib/socketClient";
 import Avatar from "@/components/Avatar";
 
 export default function ConversationPage() {
@@ -20,7 +19,6 @@ export default function ConversationPage() {
   const [fetching, setFetching] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [connected, setConnected] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,71 +29,54 @@ export default function ConversationPage() {
     if (!user) return;
     let cancelled = false;
     setFetching(true);
-    Promise.all([
-      api<{ messages: ChatMessage[] }>(`/api/conversations/${conversationId}/messages`),
-      api<{ conversations: ConversationSummary[] }>("/api/conversations"),
-    ]).then(([msgData, convData]) => {
-      if (cancelled) return;
-      setMessages(msgData.messages);
-      const conv = convData.conversations.find((c) => c.id === conversationId);
-      setOtherUser(conv?.otherUser ?? null);
-      setFetching(false);
-    });
+    Promise.all([listMessages(conversationId), listConversations(user.id), markConversationRead(conversationId, user.id)]).then(
+      ([msgs, conversations]) => {
+        if (cancelled) return;
+        setMessages(msgs);
+        setOtherUser(conversations.find((c) => c.id === conversationId)?.otherUser ?? null);
+        setFetching(false);
+      }
+    );
     return () => {
       cancelled = true;
     };
   }, [conversationId, user]);
 
+  // Supabase Realtime: stream new INSERTs on this conversation's messages
+  // straight from Postgres (gated by the same RLS policy as a normal read).
   useEffect(() => {
     if (!user) return;
-    const socket = getSocket();
-
-    function onConnect() {
-      setConnected(true);
-      socket.emit("conversation:join", conversationId);
-    }
-    function onDisconnect() {
-      setConnected(false);
-    }
-    function onMessage(msg: ChatMessage) {
-      if (msg.conversationId !== conversationId) return;
+    const unsubscribe = subscribeToMessages(conversationId, (raw) => {
+      const msg: ChatMessage = {
+        id: raw.id as string,
+        conversationId: raw.conversation_id as string,
+        content: raw.content as string,
+        createdAt: raw.created_at as string,
+        sender: { id: raw.sender_id as string, username: "", displayName: "", avatarUrl: null },
+      };
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-    }
-
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("message:new", onMessage);
-
-    if (socket.connected) onConnect();
-
-    return () => {
-      socket.emit("conversation:leave", conversationId);
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("message:new", onMessage);
-    };
+    });
+    return unsubscribe;
   }, [conversationId, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function sendMessage(e: React.FormEvent) {
+  async function onSend(e: React.FormEvent) {
     e.preventDefault();
     const content = draft.trim();
-    if (!content || sending) return;
+    if (!content || sending || !user) return;
     setSending(true);
-    getSocket().emit(
-      "message:send",
-      { conversationId, content },
-      (ack: { ok: boolean; error?: string; message?: ChatMessage }) => {
-        setSending(false);
-        if (ack?.ok && ack.message) {
-          setDraft("");
-          setMessages((prev) => (prev.some((m) => m.id === ack.message!.id) ? prev : [...prev, ack.message!]));
-        }
-      }
-    );
+    try {
+      const msg = await sendMessage(conversationId, user.id, content);
+      setDraft("");
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+    } finally {
+      setSending(false);
+    }
   }
 
   if (loading || !user) return null;
@@ -112,7 +93,6 @@ export default function ConversationPage() {
             <span className="font-medium">{otherUser.displayName}</span>
           </Link>
         )}
-        <span className={`ml-auto h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-white/20"}`} title={connected ? "Connected" : "Connecting…"} />
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto pr-1">
@@ -139,7 +119,7 @@ export default function ConversationPage() {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={sendMessage} className="mt-3 flex gap-2 border-t border-border pt-3">
+      <form onSubmit={onSend} className="mt-3 flex gap-2 border-t border-border pt-3">
         <input
           className="input"
           value={draft}

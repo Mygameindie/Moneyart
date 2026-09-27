@@ -1,50 +1,62 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api, apiPost } from "@/lib/api";
+import { createContext, useContext, useEffect, useState } from "react";
+import { getSupabase } from "@/lib/supabase";
+import { getProfileById } from "@/lib/data";
 import { PublicUser } from "@/lib/types";
 
-type CurrentUser = PublicUser & { email?: string };
-
 type AuthContextValue = {
-  user: CurrentUser | null;
+  user: PublicUser | null;
   loading: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
-  setUser: (user: CurrentUser | null) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [user, setUser] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
+  async function loadProfile(userId: string | undefined) {
+    if (!userId) {
+      setUser(null);
+      return;
+    }
     try {
-      const data = await api<{ user: CurrentUser | null }>("/api/auth/me");
-      setUser(data.user);
+      const profile = await getProfileById(userId);
+      setUser(profile);
     } catch {
       setUser(null);
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    const supabase = getSupabase();
 
-  const logout = useCallback(async () => {
-    await apiPost("/api/auth/logout");
-    setUser(null);
+    supabase.auth.getSession().then(({ data }) => {
+      loadProfile(data.session?.user.id).finally(() => setLoading(false));
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      loadProfile(session?.user.id);
+    });
+
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading, refresh, logout, setUser }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  async function refresh() {
+    const supabase = getSupabase();
+    const { data } = await supabase.auth.getSession();
+    await loadProfile(data.session?.user.id);
+  }
+
+  async function logout() {
+    await getSupabase().auth.signOut();
+    setUser(null);
+  }
+
+  return <AuthContext.Provider value={{ user, loading, refresh, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { apiPost, ApiError } from "@/lib/api";
+import { getSupabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function LoginPage() {
   const router = useRouter();
   const { refresh } = useAuth();
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -19,12 +19,13 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await apiPost("/api/auth/login", { identifier, password });
+      const { error: signInError } = await getSupabase().auth.signInWithPassword({ email, password });
+      if (signInError) throw signInError;
       await refresh();
       router.push("/");
       router.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSubmitting(false);
     }
@@ -37,13 +38,8 @@ export default function LoginPage() {
         <p className="mb-6 text-sm text-white/60">Log in to your MoneyArt account.</p>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs text-white/60">Username or email</label>
-            <input
-              className="input"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              required
-            />
+            <label className="mb-1 block text-xs text-white/60">Email</label>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </div>
           <div>
             <label className="mb-1 block text-xs text-white/60">Password</label>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { listConversations } from "@/lib/data";
 import { ConversationSummary } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
 import Avatar from "@/components/Avatar";
@@ -30,8 +30,8 @@ export default function MessagesPage() {
 
   useEffect(() => {
     if (!user) return;
-    api<{ conversations: ConversationSummary[] }>("/api/conversations")
-      .then((d) => setConversations(d.conversations))
+    listConversations(user.id)
+      .then(setConversations)
       .finally(() => setFetching(false));
   }, [user]);
 
